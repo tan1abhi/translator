@@ -1,7 +1,9 @@
 from django.urls import path
 from . import views
+from .views import webhook_view
 
 urlpatterns = [
+    path("webhooks/", webhook_view,  name="webhooks"),
     path("blogposts/", views.BlogPostListCreate.as_view() , name="blogpost-view-create"),
     path("blogposts/<int:pk>/", views.BlogPostRetrieveUpdateDestroy.as_view(), name="update"),
     path("translate/", views.TranslateListCreate.as_view() , name="Translate-view-create"),

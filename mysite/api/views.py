@@ -6,6 +6,9 @@ from .models import BlogPost,Translate, Voice_Translate
 from .serializers import BlogPostSerializer, TranslateSerializer , Voice_TranslateSerializer
 from googletrans import Translator
 from .voice_to_text import VoiceToText
+from django.views.decorators.csrf import csrf_exempt
+from django.http import HttpResponse
+
 
 # Create your views here.
 
@@ -86,3 +89,14 @@ class VoiceTranslateRetrieveUpdateDestroy(generics.RetrieveUpdateDestroyAPIView)
 
    
     
+
+@csrf_exempt
+def webhook_view(request):
+    if request.method == 'GET':
+        challenge = request.GET.get('hub.challenge')
+        return HttpResponse(challenge if challenge else 'No challenge found')
+    elif request.method == 'POST':
+        # Process the webhook payload here
+        return HttpResponse('Webhook received')
+    else:
+        return HttpResponse(status=405)
