@@ -89,14 +89,3 @@ class VoiceTranslateRetrieveUpdateDestroy(generics.RetrieveUpdateDestroyAPIView)
 
    
     
-
-@csrf_exempt
-def webhook_view(request):
-    if request.method == 'GET':
-        challenge = request.GET.get('hub.challenge')
-        return HttpResponse(challenge if challenge else 'No challenge found')
-    elif request.method == 'POST':
-        # Process the webhook payload here
-        return HttpResponse('Webhook received')
-    else:
-        return HttpResponse(status=405)
