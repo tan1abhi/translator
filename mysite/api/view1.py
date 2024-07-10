@@ -3,6 +3,7 @@ import json
 from .utils.whatsapp_utils import process_whatsapp_message,is_valid_whatsapp_message
 from flask import Blueprint, request, jsonify, current_app
 
+
 webhook_blueprint = Blueprint("webhook", __name__)
 
 def handle_message():

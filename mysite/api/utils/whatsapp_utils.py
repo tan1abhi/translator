@@ -3,9 +3,33 @@ from flask import current_app, jsonify
 import json
 import requests
 
-
 # from app.services.openai_service import generate_response
 import re
+
+
+def call_translate_api(content, lang, published_date):
+    url = f"https://improved-fishstick-r9vwgw6p64q25vqj-8080.app.github.dev/translate/"
+    headers = {
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "content": content,
+        "language": lang,
+        "published_date": published_date,
+    }
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        response.raise_for_status()  # Raises an HTTPError if the HTTP request returned an unsuccessful status code
+        return response.json()  # Return the JSON response
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Request to translate API failed: {e}")
+        return None
+
+
+
+
+#watsapp files for configuratuion and recieving of messages
+
 
 
 def log_http_response(response):
@@ -26,9 +50,6 @@ def get_text_message_input(recipient, text):
     )
 
 
-def generate_response(response):
-    # Return text in uppercase
-    return response.upper()
 
 
 def send_message(data):
@@ -83,15 +104,19 @@ def process_whatsapp_message(body):
     message = body["entry"][0]["changes"][0]["value"]["messages"][0]
     message_body = message["text"]["body"]
 
-    # TODO: implement custom function here
-    response = generate_response(message_body)
 
-    # OpenAI Integration
-    
-    # response = generate_response(message_body, wa_id, name)
-    # response = process_text_for_whatsapp(response)
+    translate_response = call_translate_api(message_body, "hindi", "2024-07-10")
 
-    data = get_text_message_input(current_app.config["RECIPIENT_WAID"], response)
+    if translate_response:
+        translated_content = translate_response.get('translated_content', '')
+
+        data = get_text_message_input(current_app.config["RECIPIENT_WAID"], translated_content)
+        send_message(data)
+
+    else:
+        logging.error("Failed to get a response from the translate API")
+
+    data = get_text_message_input(current_app.config["RECIPIENT_WAID"], translated_content)
     send_message(data)
 
 
