@@ -2,8 +2,10 @@ import logging
 from flask import current_app, jsonify
 import json
 import requests
-from voice_to_text import VoiceToText
-
+from api.voice_to_text import VoiceToText
+import tempfile
+import os
+import base64
 
 # from app.services.openai_service import generate_response
 import re
@@ -112,15 +114,50 @@ def process_whatsapp_message(body):
     message = body["entry"][0]["changes"][0]["value"]["messages"][0]
 
     message_type = message.get("type")
-
     if message_type == "audio":
-        audio = message["audio"]["body"]
+        audio = message["audio"]
+        audio_id = audio["id"]
+        logging.info(audio)
+
+        audio_url = f"https://graph.facebook.com/v20.0/{audio_id}/"
+        headers={
+            "Authorization": f"Bearer {current_app.config['ACCESS_TOKEN']}"
+        }
+        download_dir = "/workspaces/translator/audio_files"
+
+        try:
+            response = requests.get(audio_url, headers=headers)
+            if response.status_code == 200:
+                audio_info = response.json()
+                media_url = audio_info.get("url")
+
+                if media_url:
+                    # Download the media from the obtained URL with proper authentication
+                    media_response = requests.get(media_url, headers=headers)
+                    if media_response.status_code == 200:
+                        audio_data = media_response.content
+
+                        # Encode the bytes as base64
+                        encoded_audio = base64.b64encode(audio_data)
+                        voice_to_text = VoiceToText(encoded_audio)
+                        message_body = voice_to_text.base64_to_text()
+
+                        if not message_body:
+                            message_body = "Failed to convert audio to text."
+                        logging.info(message_body)
+                        
+                    else:
+                        logging.error(f"Failed to download media. Status Code: {media_response.status_code}")
+                else:
+                    logging.error("No media URL found in the response.")
+            else:
+                logging.error(f"Failed to retrieve audio information. Status Code: {response.status_code}")
+
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Error during request: {str(e)}")
         
-        # Convert audio bytes to text
-        voice_to_text = VoiceToText(audio)
-        message_body = voice_to_text.ogg_to_text()
-        if not message_body:
-            message_body = "Failed to convert audio to text."
+        # Read the contents of the file as bytes
+        
 
     else:
         message_body = message["text"]["body"]
@@ -149,16 +186,38 @@ def process_whatsapp_message(body):
 
 
 def send_language_options(recipient):
-    text = "Please select a language:\n1. Hindi\n2. Tamil"
+    text = "Please select a language:\n1. English\n2. Hindi\n3. Tamil\n4. Gujarati\n5. Marathi\n6. Assamese\n7. Bengali\n8. Kannada\n9. Kashmiri\n10. Konkani\n11. Malayalam\n12. Manipuri\n13. Nepali\n14. Odia\n15. Punjabi\n16. Sanskrit\n17. Sindhi\n18. Telugu\n19. Urdu\n20. Bodo\n21. Santhali\n22. Maithili\n23. Dogri"
     data = get_text_message_input(recipient, text)
     send_message(data)
 
 
 def handle_language_selection(wa_id, message_body):
     language_map = {
-        "1": "hindi",
-        "2": "tamil"
-    }
+    "1":"english",    
+    "2": "hindi",
+    "3": "tamil",
+    "4": "gujarati",
+    "5": "marathi",
+    "6": "assamese",
+    "7": "bengali",
+    "8": "kannada",
+    "9": "kashmiri",
+    "10": "konkani",
+    "11": "malayalam",
+    "12": "manipuri",
+    "13": "nepali",
+    "14": "odia",
+    "15": "punjabi",
+    "16": "sanskrit",
+    "17": "sindhi",
+    "18": "telugu",
+    "19": "urdu",
+    "20": "bodo",
+    "21": "santhali",
+    "22": "maithili",
+    "23": "dogri"
+}
+
 
     if message_body in language_map:
         user_states[wa_id]['language'] = language_map[message_body]
@@ -169,7 +228,7 @@ def handle_language_selection(wa_id, message_body):
         send_language_options(wa_id)
 
 def prompt_for_text(recipient):
-    text = "Please enter the text you want to translate."
+    text = "Please enter the text / voice message you want to translate."
     data = get_text_message_input(recipient, text)
     send_message(data)
 

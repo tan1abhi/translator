@@ -1,40 +1,39 @@
+import base64
 import io
 import logging
 import speech_recognition as sr
 from pydub import AudioSegment
 from pydub.exceptions import CouldntDecodeError
 
-# Path to your audio file
+
+
 
 
 class VoiceToText:
-    def __init__(self, ogg_path):
-        self.ogg_path = ogg_path
+    def __init__(self, base64_data):
+        self.base64_data = base64_data
         self.recognizer = sr.Recognizer()
 
-    def ogg_to_text(self):
+    def base64_to_text(self):
         try:
-            # Convert Ogg data to audio segment in memory
-            logging.info("Loading Ogg data...")
-            audio_segment = AudioSegment.from_file(self.ogg_path, format='ogg')
+            # Decode base64 data to bytes
+            logging.info("Decoding base64 data...")
+            audio_data = base64.b64decode(self.base64_data)
             
-            # Export audio segment to a file-like object in WAV format
-            wav_data = io.BytesIO()
-            audio_segment.export(wav_data, format='wav')
-            wav_data.seek(0)  # Rewind the stream for reading
-
+            # Convert bytes data to audio segment in memory
+            audio_segment = AudioSegment.from_file(io.BytesIO(audio_data), format='ogg')
+            
+            # Get raw audio data
+            raw_audio_data = audio_segment.raw_data
+            
+            # Create an AudioData instance
+            audio = sr.AudioData(raw_audio_data, audio_segment.frame_rate, audio_segment.sample_width)
+            
             # Recognize text from audio segment
             logging.info("Recognizing text from audio data...")
-            with sr.AudioFile(wav_data) as source:
-                self.recognizer.adjust_for_ambient_noise(source)
-                audio = self.recognizer.record(source)
-
             text = self.recognizer.recognize_google(audio)
             return text
 
-        except FileNotFoundError as e:
-            logging.error(f"FFmpeg not found: {e}")
-            return None
         except CouldntDecodeError as e:
             logging.error(f"Error decoding audio: {e}")
             return None
@@ -48,7 +47,9 @@ class VoiceToText:
             logging.error(f"Unexpected error: {e}")
             return None
 
+
 # Example usage:
+
 # # Assuming you have the path to the Ogg file and want to convert it to text
 # ogg_path = path  # Replace with your actual path to the Ogg file
 # voice_to_text = VoiceToText(ogg_path)

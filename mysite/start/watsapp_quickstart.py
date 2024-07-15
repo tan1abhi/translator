@@ -85,8 +85,7 @@ def send_message(data):
         print(response.text)
         return response
 
-
-data = get_text_message_input(recipient=RECIPIENT_WAID,  )
+data = get_text_message_input(recipient=RECIPIENT_WAID, )
 
 response = send_message(data)
 

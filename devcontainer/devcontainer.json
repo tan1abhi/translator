@@ -1,0 +1,10 @@
+{
+    "name": "My Project",
+    "build": {
+      "dockerfile": "Dockerfile"
+    },
+    "runArgs": ["--init"],
+    
+    "postCreateCommand": "sudo apt update && sudo apt install -y ffmpeg"
+  }
+  

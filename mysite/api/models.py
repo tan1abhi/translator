@@ -8,7 +8,32 @@ class BlogPost(models.Model):
 
 
 class Translate(models.Model):
-    choices = (("ENGLISH","english"),("HINDI","hindi"),("TAMIL","tamil"))
+    choices = (
+    ("ENGLISH","english"),    
+    ("ASSAMESE", "assamese"),
+    ("BENGALI", "bengali"),
+    ("GUJARATI", "gujarati"),
+    ("HINDI", "hindi"),
+    ("KANNADA", "kannada"),
+    ("KASHMIRI", "kashmiri"),
+    ("KONKANI", "konkani"),
+    ("MALAYALAM", "malayalam"),
+    ("MANIPURI", "manipuri"),
+    ("MARATHI", "marathi"),
+    ("NEPALI", "nepali"),
+    ("ODIA", "odia"),
+    ("PUNJABI", "punjabi"),
+    ("SANSKRIT", "sanskrit"),
+    ("SINDHI", "sindhi"),
+    ("TAMIL", "tamil"),
+    ("TELUGU", "telugu"),
+    ("URDU", "urdu"),
+    ("BODO", "bodo"),
+    ("SANTHALI", "santhali"),
+    ("MAITHILI", "maithili"),
+    ("DOGRI", "dogri"),
+)
+
     language = models.CharField(max_length=10,choices=choices,default="HINDI")
     translated_content= models.TextField(default="HINDI")
     content = models.TextField()
