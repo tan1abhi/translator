@@ -6,6 +6,7 @@ from api.voice_to_text import VoiceToText
 import tempfile
 import os
 import base64
+from api.text_to_voice import TextToVoice
 
 # from app.services.openai_service import generate_response
 import re
@@ -39,13 +40,15 @@ def generate_response(response):
 
 
 def generate_response_into(response):
-    return "Hey welocome to the translation app here you can translate your text and voice message files in an instant \n please type translate to begin"
+    return "Hey welcome to the translation app here you can translate your text and voice message files in an instant \n please type translate to begin"
 
 
 def log_http_response(response):
     logging.info(f"Status: {response.status_code}")
     logging.info(f"Content-type: {response.headers.get('content-type')}")
     logging.info(f"Body: {response.text}")
+
+
 
 
 def get_text_message_input(recipient, text):
@@ -59,10 +62,46 @@ def get_text_message_input(recipient, text):
         }
     )
 
+def get_voice_id(file_path):
+    url = f"https://graph.facebook.com/v20.0/{current_app.config['PHONE_NUMBER_ID']}/media"
+    headers = {
+        'Authorization': f"Bearer {current_app.config['ACCESS_TOKEN']}"
+    }
+    files = {
+        'file': (file_path, open(file_path, 'rb'), 'audio/ogg')
+    }
+    data = {
+        'type': 'audio/ogg',
+        'messaging_product': 'whatsapp'
+    }
 
+    response = requests.post(url, headers=headers, files=files, data=data)
+    logging.info(response)
+    if response.status_code == 200:
+        logging.info(response.json)
+        response_json = response.json()
+        media_id = response_json.get('id')
+        logging.info(f"Media ID: {media_id}")
+        return media_id
+    else:
+        response.raise_for_status()
+
+
+def get_voice_message_input(recipient,media_id):
+    logging.info("logging data")
+    return json.dumps(
+        {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": recipient,
+            "type": "audio",
+            "audio": {"id" : media_id},
+        }
+    )
 
 
 def send_message(data):
+    logging.info("sending message")
     headers = {
         "Content-type": "application/json",
         "Authorization": f"Bearer {current_app.config['ACCESS_TOKEN']}",
@@ -74,6 +113,7 @@ def send_message(data):
         response = requests.post(
             url, data=data, headers=headers, timeout=10
         )  # 10 seconds timeout as an example
+        logging.info(response.status_code)
         response.raise_for_status()  # Raises an HTTPError if the HTTP request returned an unsuccessful status code
     except requests.Timeout:
         logging.error("Timeout occurred while sending message")
@@ -123,7 +163,6 @@ def process_whatsapp_message(body):
         headers={
             "Authorization": f"Bearer {current_app.config['ACCESS_TOKEN']}"
         }
-        download_dir = "/workspaces/translator/audio_files"
 
         try:
             response = requests.get(audio_url, headers=headers)
@@ -163,26 +202,66 @@ def process_whatsapp_message(body):
         message_body = message["text"]["body"]
 
 
-
     if wa_id not in user_states:
-        user_states[wa_id] = {}
-    intro = {"hello","hi","Hello","Hi","hey","Hey","HELLO","HI","HEY"}
-    
-    if message_body == "Translate":
-        send_language_options(wa_id)
-        user_states[wa_id]['awaiting_language'] = True
-    elif user_states[wa_id].get('awaiting_language'):
-        handle_language_selection(wa_id, message_body)
-    elif user_states[wa_id].get('awaiting_translation_text'):
-        language = user_states[wa_id].get('language')
-        handle_translation(wa_id, message_body, language)
-    else:
-        if message_body in intro: 
-            response = generate_response_into(message_body)
-        else:
-            response = generate_response(message_body)
+        user_states[wa_id] = {
+            'state': 'initial',
+            'voice_translate': False,
+            'translate': False,
+            'awaiting_language': False,
+            'awaiting_translation_text': False,
+            'language': None
+        }
+
+    intro = {"hello", "hi", "Hello", "Hi", "hey", "Hey", "HELLO", "HI", "HEY"}
+
+    if message_body in intro:
+        response = generate_response_into(message_body)
         data = get_text_message_input(current_app.config["RECIPIENT_WAID"], response)
         send_message(data)
+        return
+
+    state = user_states[wa_id]['state']
+
+    if state == 'initial':
+        if message_body.lower() == "voice translate":
+            user_states[wa_id]['voice_translate'] = True
+            user_states[wa_id]['state'] = 'select_language'
+            send_language_options(wa_id)
+        elif message_body.lower() == "translate":
+            user_states[wa_id]['translate'] = True
+            user_states[wa_id]['state'] = 'select_language'
+            send_language_options(wa_id)
+        else:
+            response = generate_response(message_body)
+            data = get_text_message_input(current_app.config["RECIPIENT_WAID"], response)
+            send_message(data)
+    elif state == 'select_language':
+        if handle_language_selection(wa_id, message_body):
+            user_states[wa_id]['state'] = 'awaiting_translation_text'
+            prompt_for_text(wa_id)
+        else:
+            send_language_options(wa_id)
+    elif state == 'awaiting_translation_text':
+        language = user_states[wa_id]['language']
+        if user_states[wa_id]['voice_translate']:
+            translate_response = call_translate_api(message_body, language, "2024-07-10")
+            if translate_response:
+                translated_content = translate_response.get('translated_content', '')
+                handle_voice_message_response(wa_id, translated_content , language)
+            else:
+                logging.error("Failed to get a response from the translate API")
+                data = get_text_message_input(current_app.config["RECIPIENT_WAID"], "Translation failed. Please try again.")
+        else:
+            handle_translation(wa_id, message_body, language)
+        user_states[wa_id]['state'] = 'initial'
+    else:
+        response = generate_response(message_body)
+        data = get_text_message_input(current_app.config["RECIPIENT_WAID"], response)
+        send_message(data)
+
+
+
+
 
 
 def send_language_options(recipient):
@@ -193,39 +272,35 @@ def send_language_options(recipient):
 
 def handle_language_selection(wa_id, message_body):
     language_map = {
-    "1":"english",    
-    "2": "hindi",
-    "3": "tamil",
-    "4": "gujarati",
-    "5": "marathi",
-    "6": "assamese",
-    "7": "bengali",
-    "8": "kannada",
-    "9": "kashmiri",
-    "10": "konkani",
-    "11": "malayalam",
-    "12": "manipuri",
-    "13": "nepali",
-    "14": "odia",
-    "15": "punjabi",
-    "16": "sanskrit",
-    "17": "sindhi",
-    "18": "telugu",
-    "19": "urdu",
-    "20": "bodo",
-    "21": "santhali",
-    "22": "maithili",
-    "23": "dogri"
-}
-
-
+        "1":"english",    
+        "2": "hindi",
+        "3": "tamil",
+        "4": "gujarati",
+        "5": "marathi",
+        "6": "assamese",
+        "7": "bengali",
+        "8": "kannada",
+        "9": "kashmiri",
+        "10": "konkani",
+        "11": "malayalam",
+        "12": "manipuri",
+        "13": "nepali",
+        "14": "odia",
+        "15": "punjabi",
+        "16": "sanskrit",
+        "17": "sindhi",
+        "18": "telugu",
+        "19": "urdu",
+        "20": "bodo",
+        "21": "santhali",
+        "22": "maithili",
+        "23": "dogri"
+    }
     if message_body in language_map:
         user_states[wa_id]['language'] = language_map[message_body]
         user_states[wa_id]['awaiting_language'] = False
-        user_states[wa_id]['awaiting_translation_text'] = True
-        prompt_for_text(wa_id)
-    else:
-        send_language_options(wa_id)
+        return True
+    return False
 
 def prompt_for_text(recipient):
     text = "Please enter the text / voice message you want to translate."
@@ -246,8 +321,56 @@ def handle_translation(wa_id, text, language):
         data = get_text_message_input(current_app.config["RECIPIENT_WAID"], "Translation failed. Please try again.")
         send_message(data)
 
+def prompt_for_voice_message(recipient):
+    text = "Would you like to receive the translation as a voice message? Please reply with 'yes' or 'no'."
+    data = get_text_message_input(recipient, text)
+    send_message(data)
+    user_states[recipient]['awaiting_voice_message'] = True
 
+def handle_voice_message_response(wa_id, text ,language):
+    language_map = {
+        "english": "en",
+        "hindi": "hi",
+        "tamil": "ta",
+        "gujarati": "gu",
+        "marathi": "mr",
+        "assamese": "as",
+        "bengali": "bn",
+        "kannada": "kn",
+        "kashmiri": "ks",
+        "konkani": "kok",
+        "malayalam": "ml",
+        "manipuri": "mni",
+        "nepali": "ne",
+        "odia": "or",
+        "punjabi": "pa",
+        "sanskrit": "sa",
+        "sindhi": "sd",
+        "telugu": "te",
+        "urdu": "ur",
+        "bodo": "brx",
+        "santhali": "sat",
+        "maithili": "mai",
+        "dogri": "doi"
+    }
+    language_code = language_map.get(language, None)
+    if not language_code:
+        logging.error(f"Language {language} is not supported.")
+        return None
+    text_to_voice = TextToVoice(text,language_code, wa_id, save_dir='audio_files')
+    audio_path = text_to_voice.text_to_base64_audio()
+    if audio_path:
+        logging.info(f"Audio file created at: {audio_path}")
+        media_id = get_voice_id(audio_path)
+        logging.info(media_id)
+        data = get_voice_message_input(current_app.config["RECIPIENT_WAID"],media_id)
+        logging.info("data logging sucessfull")
+        send_message(data)
 
+    else:
+        logging.error("Failed to create audio file")
+        return None
+    
 
 
 
