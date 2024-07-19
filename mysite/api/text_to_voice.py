@@ -21,22 +21,23 @@ class TextToVoice:
             # Generate audio from text
             logging.info("Generating audio from text...")
             tts = gTTS(self.text, lang=self.language)
-            temp_mp3_path = os.path.join(self.save_dir  , f"temp_audio{self.wa_id}.mp3")
+            temp_mp3_path = os.path.join(self.save_dir,f"temp_audio{self.wa_id}.mp3")
             tts.save(temp_mp3_path)
 
-            # Convert the MP3 file to OGG format
-            audio = AudioSegment.from_mp3(temp_mp3_path)
-            ogg_path = os.path.join(self.save_dir, f"output_audio{self.wa_id}.ogg")
-            audio.export(ogg_path, format='ogg')
-            logging.info(f"Audio file saved to: {ogg_path}")
+            # # Convert the MP3 file to OGG format
+            # audio = AudioSegment.from_mp3(temp_mp3_path)
+            # ogg_path = os.path.join(self.save_dir, f"output_audio{self.wa_id}.ogg")
+            # audio.export(ogg_path, format='ogg', codec='libopus')
+            # logging.info(f"Audio file saved to: {ogg_path}")
 
             # Schedule file deletion after 5 minutes
-            # threading.Thread(target=delete_file, args=(ogg_path, 60)).start()
+            threading.Thread(target=delete_file, args=(temp_mp3_path, 60)).start()
 
             # Remove the temporary MP3 file
-            os.remove(temp_mp3_path)
+            # os.remove(temp_mp3_path)
 
-            return ogg_path
+
+            return temp_mp3_path
 
         except PermissionError as e:
             logging.error(f"Permission error: {e}")

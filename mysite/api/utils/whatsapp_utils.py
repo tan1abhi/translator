@@ -3,8 +3,6 @@ from flask import current_app, jsonify
 import json
 import requests
 from api.voice_to_text import VoiceToText
-import tempfile
-import os
 import base64
 from api.text_to_voice import TextToVoice
 
@@ -68,10 +66,10 @@ def get_voice_id(file_path):
         'Authorization': f"Bearer {current_app.config['ACCESS_TOKEN']}"
     }
     files = {
-        'file': (file_path, open(file_path, 'rb'), 'audio/ogg')
+        'file': (file_path, open(file_path, 'rb'), 'audio/mpeg')
     }
     data = {
-        'type': 'audio/ogg',
+        'type': 'audio/mpeg',
         'messaging_product': 'whatsapp'
     }
 
@@ -209,7 +207,9 @@ def process_whatsapp_message(body):
             'translate': False,
             'awaiting_language': False,
             'awaiting_translation_text': False,
-            'language': None
+            # 'send_to_someone' : False,
+            'language': None,
+            # 'awaiting_number' : False
         }
 
     intro = {"hello", "hi", "Hello", "Hi", "hey", "Hey", "HELLO", "HI", "HEY"}
@@ -241,6 +241,20 @@ def process_whatsapp_message(body):
             prompt_for_text(wa_id)
         else:
             send_language_options(wa_id)
+    # elif state == 'send_to_someone':
+    #     if message_body.lower() == "yes":
+    #         prompt_to_get_number(wa_id)
+    #         user_states[wa_id]['state'] = 'awaiting_translation_text'
+    #     else:
+    #         user_states[wa_id]['state'] = 'awaiting_translation_text'
+    #         prompt_for_text(wa_id)
+    # elif state == 'awaiting_number':
+    #     # Handle the logic to send the message to the given number
+    #     recipient_number = message_body
+    #     # Implement your logic here to send the message to the recipient number
+    #     user_states[wa_id]['awaiting_number'] = False
+    #     user_states[wa_id]['state'] = 'initial'
+
     elif state == 'awaiting_translation_text':
         language = user_states[wa_id]['language']
         if user_states[wa_id]['voice_translate']:
@@ -248,6 +262,7 @@ def process_whatsapp_message(body):
             if translate_response:
                 translated_content = translate_response.get('translated_content', '')
                 handle_voice_message_response(wa_id, translated_content , language)
+                user_states[wa_id]['voice_translate'] = False
             else:
                 logging.error("Failed to get a response from the translate API")
                 data = get_text_message_input(current_app.config["RECIPIENT_WAID"], "Translation failed. Please try again.")
@@ -258,11 +273,7 @@ def process_whatsapp_message(body):
         response = generate_response(message_body)
         data = get_text_message_input(current_app.config["RECIPIENT_WAID"], response)
         send_message(data)
-
-
-
-
-
+        
 
 def send_language_options(recipient):
     text = "Please select a language:\n1. English\n2. Hindi\n3. Tamil\n4. Gujarati\n5. Marathi\n6. Assamese\n7. Bengali\n8. Kannada\n9. Kashmiri\n10. Konkani\n11. Malayalam\n12. Manipuri\n13. Nepali\n14. Odia\n15. Punjabi\n16. Sanskrit\n17. Sindhi\n18. Telugu\n19. Urdu\n20. Bodo\n21. Santhali\n22. Maithili\n23. Dogri"
@@ -307,7 +318,6 @@ def prompt_for_text(recipient):
     data = get_text_message_input(recipient, text)
     send_message(data)
 
-
 def handle_translation(wa_id, text, language):
     user_states[wa_id]['awaiting_translation_text'] = False
     translate_response = call_translate_api(text, language, "2024-07-10")  # example parameters
@@ -320,6 +330,19 @@ def handle_translation(wa_id, text, language):
         logging.error("Failed to get a response from the translate API")
         data = get_text_message_input(current_app.config["RECIPIENT_WAID"], "Translation failed. Please try again.")
         send_message(data)
+
+# def prompt_to_send_recipient(recipient):
+#     text = "Do you want to send this data to someone else? if yes share their number"
+#     data = get_text_message_input(recipient, text)
+#     send_message(data)
+#     user_states[recipient]['sending_message'] = True
+
+# def prompt_to_get_number(recipient):
+#     text = "Please share their contact number"
+#     data = get_text_message_input(recipient,text)
+#     send_message(data)
+#     user_states[recipient]['awaiting_number'] = True
+
 
 def prompt_for_voice_message(recipient):
     text = "Would you like to receive the translation as a voice message? Please reply with 'yes' or 'no'."
@@ -371,9 +394,6 @@ def handle_voice_message_response(wa_id, text ,language):
         logging.error("Failed to create audio file")
         return None
     
-
-
-
 def is_valid_whatsapp_message(body):
     """
     Check if the incoming webhook event has a valid WhatsApp message structure.
