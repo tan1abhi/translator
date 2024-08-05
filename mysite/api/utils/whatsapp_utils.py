@@ -10,7 +10,7 @@ import base64
 from api.text_to_voice import TextToVoice
 # from app.services.openai_service import generate_response
 import re
-
+from api.model import UserState , db
 
 def call_translate_api(content, lang, published_date):
     url = f"https://improved-fishstick-r9vwgw6p64q25vqj-8080.app.github.dev/translate/"
@@ -44,7 +44,7 @@ def generate_response(response):
 
 
 def generate_response_into(response):
-    return "Hey welcome to the translation app here you can translate your text and voice message files in an instant \n you can \n 1) directly send text or voice message to me \n 2) type translate for text translation 3) type voice translate for voice translation"
+    return "Hey welcome to the translation app here you can translate your text and voice message files in an instant you can \n \n 1) directly send text or voice message to me or just type 1 \n \n 2) type translate or enter 2 for non stop text translation in one language \n \n  3) type voice translate or enter 3 for voice translation non stop voice translation in one language  \n\n To quit just type end or break  \n\n *In mode1 you are allowed to enter one message at a time for multiple message translations switch to mode 2 or 3 by appliying the break command*"
 
 
 def log_http_response(response):
@@ -166,7 +166,6 @@ def process_text_for_whatsapp(text):
 
     return whatsapp_style_text
 
-user_states = {}
 activity_timestamps = {}
 INACTIVITY_LIMIT = 60 
 
@@ -176,23 +175,40 @@ def reset_inactive_users():
         for wa_id, last_activity in list(activity_timestamps.items()):
             if current_time - last_activity > INACTIVITY_LIMIT:
                 logging.info(f"Resetting state for inactive user: {wa_id}")
-                user_states[wa_id] = {
-                    'state': 'initial',
-                    'voice_translate': False,
-                    'translate': False,
-                    'awaiting_language': False,
-                    'awaiting_translation_text': False,
-                    'send_to_someone': False,
-                    'language': None,
-                    'awaiting_number': False,
-                    'message_body': "",
-                    'recipient_number': None,
-                }
+                user = UserState(
+                    wa_id = wa_id,
+                    state = 'initial',
+                    voice_translate = False,
+                    translate = False,
+                    awaiting_language = False,
+                    awaiting_translation_text = False,
+                    send_to_someone = False,
+                    language = None,
+                    awaiting_number = False,
+                    message_body = "",
+                    recipient_number = None,
+                )
                 del activity_timestamps[wa_id]
         time.sleep(5)  # Check every 5 seconds
 
 # Start the background thread
 threading.Thread(target=reset_inactive_users, daemon=True).start()
+
+
+def reset_user_state(user):
+    user.state = 'initial'
+    user.list = False
+    user.voice_translate = False
+    user.translate = False
+    user.awaiting_language = False
+    user.awaiting_translation_text = False
+    user.send_to_someone = False
+    user.language = None
+    user.awaiting_number = False
+    user.message_body = ""
+    user.recipient_number = None
+    db.session.commit()
+
 
 
 def process_whatsapp_message(body):
@@ -203,79 +219,64 @@ def process_whatsapp_message(body):
 
     message_type = message.get("type")
 
+    user = UserState.query.filter_by(wa_id=wa_id).first()
+    state = UserState.state
+
     if message_type == "contacts":
         phone = message["contacts"][0]["phones"][0]
         phone_no = phone.get("wa_id")
         logging.info("Contact message processed")
 
-        if phone_no and phone_no not in user_states:
-            # send_whatsapp_message(phone_no)
-            user_states[phone_no] = {
-                'state': 'initial',
-                'voice_translate': False,
-                'translate': False,
-                'awaiting_language': False,
-                'awaiting_translation_text': False,
-                'send_to_someone': False,
-                'language': None,
-                'awaiting_number': False,
-                'message_body': "",
-                'recipient_number': None,
-            } 
-            # translate_response = call_translate_api(user_states[wa_id]['message_body'], user_states[wa_id]['language'] , "2024-07-10")
-            # if translate_response:
-            #     translated_content = translate_response.get('translated_content', '')
-                
-            #     handle_voice_message_response(user_states[wa_id]['recipient_number'], translated_content, user_states[wa_id]['language'])
-            #     data = get_text_message_input(user_states[wa_id]['recipient_number'], translated_content)
-            #     send_message(data)
+        recipient = UserState.query.filter_by(wa_id=phone_no).first()
 
+        if phone_no and not recipient:
+            recipient = UserState(
+                wa_id=phone_no,
+                state='initial',
+                voice_translate=False,
+                translate=False,
+                awaiting_language=False,
+                awaiting_translation_text=False,
+                send_to_someone=False,
+                language=None,
+                awaiting_number=False,
+                message_body="",
+                recipient_number=None,
+            )
+            db.session.add(recipient)
+            db.session.commit()
 
-        if wa_id not in user_states:
-            
-            user_states[wa_id] = {
-                'state': 'initial',
-                'voice_translate': False,
-                'translate': False,
-                'awaiting_language': False,
-                'awaiting_translation_text': False,
-                'send_to_someone': False,
-                'language': None,
-                'awaiting_number': False,
-                'message_body': "",
-                'recipient_number': phone_no,  # Add phone number here
-            }
-        else:
-            user_states[wa_id]['recipient_number'] = phone_no 
-
-        translate_response = call_translate_api(user_states[wa_id]['message_body'], user_states[wa_id]['language'] , "2024-07-10")
-        if translate_response:
-            translated_content = translate_response.get('translated_content', '')
-            
-            handle_voice_message_response(user_states[wa_id]['recipient_number'], translated_content, user_states[wa_id]['language'])
-            data = get_text_message_input(user_states[wa_id]['recipient_number'], translated_content)
-            send_message(data)
+        user = UserState.query.filter_by(wa_id=wa_id).first()
         
+        if user:
+            user.recipient_number = phone_no
+            translate_response = call_translate_api(user.message_body, user.language, "2024-07-10")
+            
+            if translate_response:
+                translated_content = translate_response.get('translated_content', '')
+                handle_voice_message_response(user.recipient_number, translated_content, user.language)
+                data = get_text_message_input(user.recipient_number, translated_content)
+                send_message(data)
 
-        user_states[wa_id]['message_body'] = ""
-        user_states[wa_id]['recipient_number'] = ""
-        data = get_text_message_input(wa_id,text='message sent successfully')
-        send_message(data)
+            user.message_body = ""
+            user.recipient_number = ""
+            data = get_text_message_input(wa_id, text='message sent successfully')
+            send_message(data)
 
+            user.state = 'initial'
+            user.list = False
+            user.voice_translate = False
+            user.translate = False
+            user.awaiting_language = False
+            user.awaiting_translation_text = False
+            user.send_to_someone = False
+            user.language = None
+            user.awaiting_number = False
+            user.message_body = ""
+            user.recipient_number = None
+            db.session.commit()
 
-        user_states[wa_id] = {
-            'state': 'initial',
-            'voice_translate': False,
-            'translate': False,
-            'awaiting_language': False,
-            'awaiting_translation_text': False,
-            'send_to_someone': False,
-            'language': None,
-            'awaiting_number': False,
-            'message_body': "",
-            'recipient_number': None,
-        }
-        logging.info(user_states[wa_id]) # Update phone number if user already exists
+            logging.info(user.wa_id) # Update phone number if user already exists
         return
 
     elif message_type == "audio":
@@ -322,113 +323,160 @@ def process_whatsapp_message(body):
     elif message_type == "text":
         message_body = message["text"]["body"]
 
-        if wa_id not in user_states:
-
-            user_states[wa_id] = {
-                'state': 'initial',
-                'voice_translate': False,
-                'translate': False,
-                'awaiting_language': False,
-                'awaiting_translation_text': False,
-                'send_to_someone': False,
-                'language': None,
-                'awaiting_number': False,
-                'message_body': "",
-                'recipient_number': None,
-            }
+        if not UserState.query.filter_by(wa_id=wa_id).first():
+            user = UserState(
+                wa_id=wa_id,
+                state= 'initial',
+                list = False,
+                voice_translate = False,
+                translate = False,
+                awaiting_language = False,
+                awaiting_translation_text = False,
+                send_to_someone = False,
+                language = None,
+                awaiting_number = False,
+                message_body = "",
+                recipient_number = None,
+            )
 
             activity_timestamps[wa_id] = time.time()
 
         intro = {"hello", "hi", "Hello", "Hi", "hey", "Hey", "HELLO", "HI", "HEY"}
 
-        if message_body in intro:
+        end = {"end","kill","break"}
+
+        if message_body.lower() in end:
+            logging.info("end message")
+            reset_user_state(user)
+            response = "thankyou for using our services"
+            data = get_text_message_input(wa_id,response)
+            send_message(data)
+            db.session.commit()
+            return
+
+        if message_body.lower() in intro:
+            logging.info("intro message")
+            reset_user_state(user)
             response = generate_response_into(message_body)
             data = get_text_message_input(wa_id, response)
             send_message(data)
+            db.session.commit()
             return
 
-        state = user_states[wa_id]['state']
+        state = user.state
 
         if state == 'initial':
-            if message_body.lower() == "voice translate":
-                user_states[wa_id]['voice_translate'] = True
-                user_states[wa_id]['state'] = 'select_language'
-                send_language_options(wa_id)
-            elif message_body.lower() == "translate":
-                user_states[wa_id]['translate'] = True
-                user_states[wa_id]['state'] = 'select_language'
-                send_language_options(wa_id)
+            logging.info("intitial - state ")
+            if message_body.lower() == "voice translate" or message_body == '3':
+                user.voice_translate = True
+                user.state = 'select_language'
+                response = "please enter the language you want to translate messages in and type list to get a list of avilable languages"
+                data = get_text_message_input(wa_id,response)
+                send_message(data)
+
+               
+            elif message_body.lower() == "translate" or message_body == '2':
+                user.translate = True
+                user.state = 'select_language'
+                response = "please enter the language you want to translate messages and type list to get a list of avilable languages"
+                data = get_text_message_input(wa_id,response)
+                send_message(data)
+                
+            elif message_body.lower() == '1':
+                response = "please enter the text you want to translate"
+                data = get_text_message_input(wa_id, response)
+                send_message(data)
             else:
-                user_states[wa_id]['state'] = 'select_language'
-                user_states[wa_id]['message_body'] = message_body
+                user.state = 'select_language'
+                user.message_body = message_body
+                response = "please enter the language you want to translate messages in and type list to get a list of avilable languages"
+                data = get_text_message_input(wa_id,response)
+                send_message(data)
+                
+        elif state == 'select_language':
+            logging.info( " select_language")
+            if message_body.lower() == 'list':
                 send_language_options(wa_id)
 
-        elif state == 'select_language':
+            
             if handle_language_selection(wa_id, message_body):
-                user_states[wa_id]['state'] = 'awaiting_translation_text'
-                if user_states[wa_id]['message_body'] == "":
+                user.state = 'awaiting_translation_text'
+                if user.message_body == "":
                     prompt_for_text(wa_id)
                 else:
-                    proceed_with_translation(wa_id, user_states[wa_id]['message_body'])
+                    proceed_with_translation(wa_id, user.message_body)
             else:
-                send_language_options(wa_id)
+                response = "please enter the language you want to translate the messages"
+                data = get_text_message_input(wa_id,response)
+                send_message(data)
 
         elif state == 'awaiting_translation_text':
-            language = user_states[wa_id]['language']
-            if user_states[wa_id]['voice_translate']:
+
+            logging.info("awaiting_translation_text")
+            language = user.language
+            if user.voice_translate == True:
+                logging.info("voice translate")
                 translate_response = call_translate_api(message_body, language, "2024-07-10")
                 if translate_response:
                     translated_content = translate_response.get('translated_content', '')
                     handle_voice_message_response(wa_id, translated_content, language)
-                    user_states[wa_id]['voice_translate'] = False
+                    
                 else:
                     logging.error("Failed to get a response from the translate API")
                     data = get_text_message_input(wa_id, "Translation failed. Please try again.")
                     send_message(data)
-            elif user_states[wa_id]['translate']:
+            elif user.translate:
+                logging.info("translate")
                 handle_translation(wa_id, message_body, language)
             else:
-                proceed_with_translation(wa_id, user_states[wa_id]['message_body'])
-                user_states[wa_id]['message_body'] = ""
+                proceed_with_translation(wa_id, user.message_body)
+                user.message_body = ""
 
         elif state == 'send_to_someone':
+            logging.info("send_to_someone")
             if message_body.lower() == "yes":
                 prompt_to_get_number(wa_id)
-                user_states[wa_id]['state'] = 'awaiting_number'
+                user.state = 'awaiting_number'
             else:
                 response = "Thank you for using the translation service."
                 data = get_text_message_input(wa_id, response)
                 send_message(data)
-                user_states[wa_id]['state'] = 'initial'
+                reset_user_state(user)
         elif state == 'awaiting_number':
-            user_states[wa_id]['recipient_number'] = message_body
-            response = f"Message will be sent to {user_states[wa_id]['recipient_number']}."
+            logging.info("awating_number ")
+            user.recipient_number = message_body
+            response = f"Message will be sent to {user.recipient_number}."
             data = get_text_message_input(wa_id, response)
             send_message(data)
-            user_states[wa_id]['state'] = 'initial'
+            reset_user_state(user)
         else:
             response = generate_response(message_body)
             data = get_text_message_input(wa_id, response)
+            reset_user_state(user)
             send_message(data)
     else:
         response = "please send a valid message type accepted types are \n1) text \n2) audio \n3) contact"
         data = get_text_message_input(wa_id, response)
         send_message(data)
+    db.session.commit()
 
 def proceed_with_translation(wa_id, message_body):
-    language = user_states[wa_id]['language']
+    user = UserState.query.filter_by(wa_id=wa_id).first()
+    language = user.language
     handle_translation(wa_id, message_body, language)
     translate_response = call_translate_api(message_body, language, "2024-07-10")
     if translate_response:
         translated_content = translate_response.get('translated_content', '')
         handle_voice_message_response(wa_id, translated_content, language)
-        user_states[wa_id]['state'] = 'send_to_someone'
+        user.state = 'send_to_someone'
     else:
         logging.error("Failed to get a response from the translate API")
         data = get_text_message_input(wa_id, "Translation failed. Please try again.")
         send_message(data)
-        user_states[wa_id]['state'] = 'initial'
+        user.state = 'initial'
+    db.session.commit()
     prompt_to_send_recipient(wa_id)
+
 
         
 
@@ -439,34 +487,81 @@ def send_language_options(recipient):
 
 
 def handle_language_selection(wa_id, message_body):
+    user = UserState.query.filter_by(wa_id=wa_id).first()
     language_map = {
-        "1":"english",    
+        "1": "english",
+        "english": "english",
+        "eng": "english",
         "2": "hindi",
+        "hindi": "hindi",
+        "hi": "hindi",
         "3": "tamil",
+        "tamil": "tamil",
+        "ta": "tamil",
         "4": "gujarati",
+        "gujarati": "gujarati",
+        "gu": "gujarati",
         "5": "marathi",
+        "marathi": "marathi",
+        "ma": "marathi",
         "6": "assamese",
+        "assamese": "assamese",
+        "as": "assamese",
         "7": "bengali",
+        "bengali": "bengali",
+        "ben": "bengali",
         "8": "kannada",
+        "kannada": "kannada",
+        "kn": "kannada",
         "9": "kashmiri",
+        "kashmiri": "kashmiri",
+        "ks": "kashmiri",
         "10": "konkani",
+        "konkani": "konkani",
+        "kok": "konkani",
         "11": "malayalam",
+        "malayalam": "malayalam",
+        "ml": "malayalam",
         "12": "manipuri",
+        "manipuri": "manipuri",
+        "mni": "manipuri",
         "13": "nepali",
+        "nepali": "nepali",
+        "ne": "nepali",
         "14": "odia",
+        "odia": "odia",
+        "or": "odia",
         "15": "punjabi",
+        "punjabi": "punjabi",
+        "pa": "punjabi",
         "16": "sanskrit",
+        "sanskrit": "sanskrit",
+        "sa": "sanskrit",
         "17": "sindhi",
+        "sindhi": "sindhi",
+        "sd": "sindhi",
         "18": "telugu",
+        "telugu": "telugu",
+        "te": "telugu",
         "19": "urdu",
+        "urdu": "urdu",
+        "ur": "urdu",
         "20": "bodo",
+        "bodo": "bodo",
+        "brx": "bodo",
         "21": "santhali",
+        "santhali": "santhali",
+        "sat": "santhali",
         "22": "maithili",
-        "23": "dogri"
+        "maithili": "maithili",
+        "mai": "maithili",
+        "23": "dogri",
+        "dogri": "dogri"
     }
-    if message_body in language_map:
-        user_states[wa_id]['language'] = language_map[message_body]
-        user_states[wa_id]['awaiting_language'] = False
+    
+    if message_body.lower() in language_map:
+        user.language = language_map[message_body.lower()]
+        user.awaiting_language = False
         return True
     return False
 
@@ -476,7 +571,8 @@ def prompt_for_text(recipient):
     send_message(data)
 
 def handle_translation(wa_id, text, language):
-    user_states[wa_id]['awaiting_translation_text'] = False
+    user = UserState.query.filter_by(wa_id=wa_id).first()
+    user.awaiting_translation_text = False
     translate_response = call_translate_api(text, language, "2024-07-10")  # example parameters
 
     if translate_response:
@@ -484,31 +580,38 @@ def handle_translation(wa_id, text, language):
         data = get_text_message_input(wa_id, translated_content)
         send_message(data)
     else:
-        user_states[wa_id]['state'] = 'initial'
+        user.state = 'initial'
         logging.error("Failed to get a response from the translate API")
         data = get_text_message_input(wa_id, "Translation failed. Please try again.")
         send_message(data)
+    db.session.commit()
 
 def prompt_to_send_recipient(recipient):
+    user = UserState.query.filter_by(wa_id=recipient).first()
     text = "Do you want to send this data to someone else? please type yes or no"
     data = get_text_message_input(recipient, text)
     send_message(data)
-    user_states[recipient]['send_to_someone'] = True
+    user.send_to_someone = True
+    db.session.commit()
 
 def prompt_to_get_number(recipient):
+    user = UserState.query.filter_by(wa_id=recipient).first()
     text = "Please share their contact number"
     data = get_text_message_input(recipient,text)
     send_message(data)
-    user_states[recipient]['awaiting_number'] = True
-
+    user.awaiting_number = True
+    db.session.commit()
 
 def prompt_for_voice_message(recipient):
+    user = UserState.query.filter_by(wa_id=recipient).first()
     text = "Would you like to receive the translation as a voice message? Please reply with 'yes' or 'no'."
     data = get_text_message_input(recipient, text)
     send_message(data)
-    user_states[recipient]['awaiting_voice_message'] = True
+    user.awaiting_voice_message = True
+    db.session.commit()
 
 def handle_voice_message_response(wa_id, text ,language):
+    user = UserState.query.filter_by(wa_id=wa_id).first()
     language_map = {
         "english": "en",
         "hindi": "hi",
@@ -549,7 +652,7 @@ def handle_voice_message_response(wa_id, text ,language):
         send_message(data)
 
     else:
-        user_states[wa_id]['state'] = 'initial'
+        user.state = 'initial'
         logging.error("Failed to create audio file")
         return None
     
